@@ -35,6 +35,8 @@ uint32_t set_size = 1;
 
 int set_status_cpl = -1;
 
+#define UT_HOSTID "e53e9258-c93b-48b5-be1a-f025af6d232a"
+
 DEFINE_STUB(nvme_ctrlr_cmd_set_host_id, int,
 	    (struct spdk_nvme_ctrlr *ctrlr, void *host_id, uint32_t host_id_size,
 	     spdk_nvme_cmd_cb cb_fn, void *cb_arg), 0);
@@ -54,6 +56,17 @@ DEFINE_STUB(spdk_nvme_ctrlr_cmd_security_send, int, (struct spdk_nvme_ctrlr *ctr
 		uint8_t secp, uint16_t spsp, uint8_t nssf, void *payload,
 		uint32_t payload_size, spdk_nvme_cmd_cb cb_fn, void *cb_arg), 0);
 DEFINE_STUB_V(nvme_qpair_abort_queued_reqs, (struct spdk_nvme_qpair *qpair));
+
+int
+nvme_get_default_hostnqn(char *buf, int len)
+{
+	const char *nqn = "nqn.2014-08.org.nvmexpress:uuid:" UT_HOSTID;
+
+	SPDK_CU_ASSERT_FATAL(len >= (int)strlen(nqn));
+	memcpy(buf, nqn, strlen(nqn));
+
+	return 0;
+}
 
 DEFINE_RETURN_MOCK(nvme_transport_ctrlr_get_memory_domains, int);
 int
@@ -319,6 +332,7 @@ spdk_nvme_ctrlr_cmd_set_feature(struct spdk_nvme_ctrlr *ctrlr, uint8_t feature,
 				spdk_nvme_cmd_cb cb_fn, void *cb_arg)
 {
 	g_ut_cdw11 = cdw11;
+	fake_cpl_sc(cb_fn, cb_arg);
 	return 0;
 }
 
@@ -652,6 +666,19 @@ nvme_ns_free_zns_specific_data(struct spdk_nvme_ns *ns)
 	if (ns->nsdata_zns) {
 		spdk_free(ns->nsdata_zns);
 		ns->nsdata_zns = NULL;
+	}
+}
+
+void
+nvme_ns_free_nvm_specific_data(struct spdk_nvme_ns *ns)
+{
+	if (!ns->id) {
+		return;
+	}
+
+	if (ns->nsdata_nvm) {
+		spdk_free(ns->nsdata_nvm);
+		ns->nsdata_nvm = NULL;
 	}
 }
 
@@ -1900,12 +1927,37 @@ test_nvme_ctrlr_set_supported_features(void)
 }
 
 static void
+test_nvme_ctrlr_set_host_feature(void)
+{
+	DECLARE_AND_CONSTRUCT_CTRLR();
+
+	SPDK_CU_ASSERT_FATAL(nvme_ctrlr_construct(&ctrlr) == 0);
+
+	ctrlr.cdata.ctratt.bits.elbas = 0;
+	ctrlr.state = NVME_CTRLR_STATE_SET_HOST_FEATURE;
+
+	CU_ASSERT(nvme_ctrlr_process_init(&ctrlr) == 0);
+	CU_ASSERT(ctrlr.state == NVME_CTRLR_STATE_SET_DB_BUF_CFG);
+
+	ctrlr.cdata.ctratt.bits.elbas = 1;
+	ctrlr.state = NVME_CTRLR_STATE_SET_HOST_FEATURE;
+
+	while (ctrlr.state != NVME_CTRLR_STATE_SET_DB_BUF_CFG) {
+		CU_ASSERT(nvme_ctrlr_process_init(&ctrlr) == 0);
+	}
+
+	CU_ASSERT(ctrlr.tmp_ptr == NULL);
+	CU_ASSERT(ctrlr.feature_supported[SPDK_NVME_FEAT_HOST_BEHAVIOR_SUPPORT] == true);
+
+	nvme_ctrlr_destruct(&ctrlr);
+}
+
+static void
 test_ctrlr_get_default_ctrlr_opts(void)
 {
 	struct spdk_nvme_ctrlr_opts opts = {};
 
-	CU_ASSERT(spdk_uuid_parse(&g_spdk_nvme_driver->default_extended_host_id,
-				  "e53e9258-c93b-48b5-be1a-f025af6d232a") == 0);
+	CU_ASSERT(spdk_uuid_parse(&g_spdk_nvme_driver->default_extended_host_id, UT_HOSTID) == 0);
 
 	memset(&opts, 0, sizeof(opts));
 
@@ -3387,6 +3439,7 @@ main(int argc, char **argv)
 	CU_ADD_TEST(suite, test_nvme_ctrlr_fail);
 	CU_ADD_TEST(suite, test_nvme_ctrlr_construct_intel_support_log_page_list);
 	CU_ADD_TEST(suite, test_nvme_ctrlr_set_supported_features);
+	CU_ADD_TEST(suite, test_nvme_ctrlr_set_host_feature);
 	CU_ADD_TEST(suite, test_spdk_nvme_ctrlr_doorbell_buffer_config);
 #if 0 /* TODO: move to PCIe-specific unit test */
 	CU_ADD_TEST(suite, test_nvme_ctrlr_alloc_cmb);

@@ -434,9 +434,8 @@ function get_config_params() {
 		fi
 	fi
 
-	if [[ $SPDK_TEST_UNITTEST -eq 0 && \
-		$SPDK_TEST_SCANBUILD -eq 0 && -z \
-		${SPDK_TEST_AUTOBUILD:-} ]]; then
+	if [[ $SPDK_TEST_UNITTEST -eq 0 &&
+		$SPDK_TEST_SCANBUILD -eq 0 && -z ${SPDK_TEST_AUTOBUILD:-} ]]; then
 		config_params+=' --disable-unit-tests'
 	fi
 
@@ -795,7 +794,7 @@ function process_core() {
 		cat <<- BT
 			##### CORE BT ${core##*/} #####
 
-			$(<"$core")
+			$(< "$core")
 
 			--
 		BT
@@ -1104,7 +1103,7 @@ function run_test() {
 	fi
 
 	xtrace_disable
-	local test_name="$1" pid
+	local test_name="$1" pid es=0
 	shift
 
 	if [ -n "${test_domain:-}" ]; then
@@ -1121,7 +1120,7 @@ function run_test() {
 	echo "START TEST $test_name"
 	echo "************************************"
 	xtrace_restore
-	time "$@"
+	time "$@" || es=$?
 	xtrace_disable
 	echo "************************************"
 	echo "END TEST $test_name"
@@ -1139,6 +1138,8 @@ function run_test() {
 		echo "$test_domain $test_name" >> $output_dir/test_completions.txt
 	fi
 	xtrace_restore
+
+	return "$es"
 }
 
 function skip_run_test_with_warning() {
@@ -1611,7 +1612,7 @@ function pap() {
 	while read -r file; do
 		cat <<- FILE
 			--- $file ---
-			$(<"$file")
+			$(< "$file")
 			--- $file ---
 		FILE
 		rm -f "$file"
@@ -1682,7 +1683,7 @@ set -o errtrace
 shopt -s extdebug
 trap "trap - ERR; print_backtrace >&2" ERR
 
-PS4=' \t $test_domain -- ${BASH_SOURCE#${BASH_SOURCE%/*/*}/}@${LINENO} -- \$ '
+PS4=' \t ${test_domain:-} -- ${BASH_SOURCE#${BASH_SOURCE%/*/*}/}@${LINENO} -- \$ '
 if $SPDK_AUTOTEST_X; then
 	# explicitly enable xtraces, overriding any tracking information.
 	xtrace_fd

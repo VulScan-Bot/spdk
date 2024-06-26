@@ -562,7 +562,6 @@ if __name__ == "__main__":
                                        timeout_us=args.timeout_us,
                                        timeout_admin_us=args.timeout_admin_us,
                                        keep_alive_timeout_ms=args.keep_alive_timeout_ms,
-                                       retry_count=args.retry_count,
                                        arbitration_burst=args.arbitration_burst,
                                        low_priority_weight=args.low_priority_weight,
                                        medium_priority_weight=args.medium_priority_weight,
@@ -599,8 +598,6 @@ if __name__ == "__main__":
                    help="Timeout for each admin command, in microseconds. If 0, treat same as io timeouts.", type=int)
     p.add_argument('-k', '--keep-alive-timeout-ms',
                    help="Keep alive timeout period in millisecond. If 0, disable keep-alive.", type=int)
-    p.add_argument('-n', '--retry-count',
-                   help='the number of attempts per I/O when an I/O fails. (deprecated, please use --transport-retry-count.)', type=int)
     p.add_argument('--arbitration-burst',
                    help='the value is expressed as a power of two', type=int)
     p.add_argument('--low-priority-weight',
@@ -705,7 +702,7 @@ if __name__ == "__main__":
                                                          prchk_guard=args.prchk_guard,
                                                          hdgst=args.hdgst,
                                                          ddgst=args.ddgst,
-                                                         fabrics_timeout=args.fabrics_timeout,
+                                                         fabrics_connect_timeout_us=args.fabrics_connect_timeout_us,
                                                          multipath=args.multipath,
                                                          num_io_queues=args.num_io_queues,
                                                          ctrlr_loss_timeout_sec=args.ctrlr_loss_timeout_sec,
@@ -742,7 +739,8 @@ if __name__ == "__main__":
                    help='Enable TCP header digest.', action='store_true')
     p.add_argument('-d', '--ddgst',
                    help='Enable TCP data digest.', action='store_true')
-    p.add_argument('--fabrics-timeout', type=int, help='Fabrics connect timeout in microseconds')
+    p.add_argument('--fabrics-timeout', type=int, help='Fabrics connect timeout in microseconds',
+                   dest="fabrics_connect_timeout_us")
     p.add_argument('-x', '--multipath', help='Set multipath behavior (disable, failover, multipath)')
     p.add_argument('--num-io-queues', type=int, help='Set the number of IO queues to request during initialization.')
     p.add_argument('-l', '--ctrlr-loss-timeout-sec',
@@ -3781,7 +3779,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
         args.func(args)
         check_called_name(args.called_rpc_name)
 
-    def execute_script(parser, client, fd):
+    def execute_script(parser, client, timeout, fd):
         executed_rpc = ""
         for rpc_call in map(str.rstrip, fd):
             if not rpc_call.strip():
@@ -3793,6 +3791,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                 continue
             args = parser.parse_args(rpc_args)
             args.client = client
+            args.timeout = timeout
             try:
                 call_rpc_func(args)
             except JSONRPCException as ex:
@@ -3904,4 +3903,4 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
             print(ex.message)
             exit(1)
     else:
-        execute_script(parser, args.client, sys.stdin)
+        execute_script(parser, args.client, args.timeout, sys.stdin)

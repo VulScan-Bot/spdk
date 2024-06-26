@@ -51,7 +51,7 @@ def bdev_wait_for_examine(client):
     return client.call('bdev_wait_for_examine')
 
 
-def bdev_compress_create(client, base_bdev_name, pm_path, lb_size):
+def bdev_compress_create(client, base_bdev_name, pm_path, lb_size=None):
     """Construct a compress virtual block device.
 
     Args:
@@ -135,7 +135,7 @@ def bdev_crypto_delete(client, name):
     return client.call('bdev_crypto_delete', params)
 
 
-def bdev_ocf_create(client, name, mode, cache_line_size, cache_bdev_name, core_bdev_name):
+def bdev_ocf_create(client, name, mode, cache_bdev_name, core_bdev_name, cache_line_size=None):
     """Add an OCF block device
 
     Args:
@@ -210,7 +210,7 @@ def bdev_ocf_get_bdevs(client, name=None):
     Returns:
         Array of OCF devices with their current status
     """
-    params = None
+    params = {}
     if name:
         params = {'name': name}
     return client.call('bdev_ocf_get_bdevs', params)
@@ -234,7 +234,7 @@ def bdev_ocf_set_cache_mode(client, name, mode):
     return client.call('bdev_ocf_set_cache_mode', params)
 
 
-def bdev_ocf_set_seqcutoff(client, name, policy, threshold, promotion_count):
+def bdev_ocf_set_seqcutoff(client, name, policy, threshold=None, promotion_count=None):
     """Set sequential cutoff parameters on all cores for the given OCF cache device
 
     Args:
@@ -417,12 +417,11 @@ def bdev_raid_get_bdevs(client, category):
     return client.call('bdev_raid_get_bdevs', params)
 
 
-def bdev_raid_create(client, name, raid_level, base_bdevs, strip_size=None, strip_size_kb=None, uuid=None, superblock=False):
+def bdev_raid_create(client, name, raid_level, base_bdevs, strip_size_kb=None, uuid=None, superblock=False):
     """Create raid bdev. Either strip size arg will work but one is required.
 
     Args:
         name: user defined raid bdev name
-        strip_size (deprecated): strip size of raid bdev in KB, supported values like 8, 16, 32, 64, 128, 256, etc
         strip_size_kb: strip size of raid bdev in KB, supported values like 8, 16, 32, 64, 128, 256, etc
         raid_level: raid level of raid bdev, supported values 0
         base_bdevs: Space separated names of Nvme bdevs in double quotes, like "Nvme0n1 Nvme1n1 Nvme2n1"
@@ -434,9 +433,6 @@ def bdev_raid_create(client, name, raid_level, base_bdevs, strip_size=None, stri
         None
     """
     params = {'name': name, 'raid_level': raid_level, 'base_bdevs': base_bdevs, 'superblock': superblock}
-
-    if strip_size:
-        params['strip_size'] = strip_size
 
     if strip_size_kb:
         params['strip_size_kb'] = strip_size_kb
@@ -613,7 +609,7 @@ def bdev_xnvme_delete(client, name):
 
 
 def bdev_nvme_set_options(client, action_on_timeout=None, timeout_us=None, timeout_admin_us=None,
-                          keep_alive_timeout_ms=None, retry_count=None, arbitration_burst=None,
+                          keep_alive_timeout_ms=None, arbitration_burst=None,
                           low_priority_weight=None, medium_priority_weight=None, high_priority_weight=None,
                           nvme_adminq_poll_period_us=None, nvme_ioq_poll_period_us=None, io_queue_requests=None,
                           delay_cmd_submit=None, transport_retry_count=None, bdev_retry_count=None,
@@ -629,7 +625,6 @@ def bdev_nvme_set_options(client, action_on_timeout=None, timeout_us=None, timeo
         timeout_us: Timeout for each command, in microseconds. If 0, don't track timeouts (optional)
         timeout_admin_us: Timeout for each admin command, in microseconds. If 0, treat same as io timeouts (optional)
         keep_alive_timeout_ms: Keep alive timeout period in millisecond, default is 10s (optional)
-        retry_count: The number of attempts per I/O when an I/O fails (deprecated) (optional)
         arbitration_burst: The value is expressed as a power of two (optional)
         low_priority_weight: The number of commands that may be executed from the low priority queue at one time (optional)
         medium_priority_weight: The number of commands that may be executed from the medium priority queue at one time (optional)
@@ -687,10 +682,6 @@ def bdev_nvme_set_options(client, action_on_timeout=None, timeout_us=None, timeo
 
     if keep_alive_timeout_ms is not None:
         params['keep_alive_timeout_ms'] = keep_alive_timeout_ms
-
-    if retry_count is not None:
-        print("WARNING: retry_count is deprecated, please use transport_retry_count.")
-        params['retry_count'] = retry_count
 
     if arbitration_burst is not None:
         params['arbitration_burst'] = arbitration_burst
@@ -788,10 +779,10 @@ def bdev_nvme_set_hotplug(client, enable, period_us=None):
 def bdev_nvme_attach_controller(client, name, trtype, traddr, adrfam=None, trsvcid=None,
                                 priority=None, subnqn=None, hostnqn=None, hostaddr=None,
                                 hostsvcid=None, prchk_reftag=None, prchk_guard=None,
-                                hdgst=None, ddgst=None, fabrics_timeout=None, multipath=None, num_io_queues=None,
-                                ctrlr_loss_timeout_sec=None, reconnect_delay_sec=None,
-                                fast_io_fail_timeout_sec=None, psk=None, max_bdevs=None,
-                                dhchap_key=None, dhchap_ctrlr_key=None):
+                                hdgst=None, ddgst=None, fabrics_connect_timeout_us=None,
+                                multipath=None, num_io_queues=None, ctrlr_loss_timeout_sec=None,
+                                reconnect_delay_sec=None, fast_io_fail_timeout_sec=None,
+                                psk=None, max_bdevs=None, dhchap_key=None, dhchap_ctrlr_key=None):
     """Construct block device for each NVMe namespace in the attached controller.
 
     Args:
@@ -809,7 +800,7 @@ def bdev_nvme_attach_controller(client, name, trtype, traddr, adrfam=None, trsvc
         prchk_guard: Enable checking of PI guard for I/O processing (optional)
         hdgst: Enable TCP header digest (optional)
         ddgst: Enable TCP data digest (optional)
-        fabrics_timeout: Fabrics connect timeout in us (optional)
+        fabrics_connect_timeout_us: Fabrics connect timeout in us (optional)
         multipath: The behavior when multiple paths are created ("disable", "failover", or "multipath"; failover if not specified)
         num_io_queues: The number of IO queues to request during initialization. (optional)
         ctrlr_loss_timeout_sec: Time to wait until ctrlr is reconnected before deleting ctrlr.
@@ -871,8 +862,8 @@ def bdev_nvme_attach_controller(client, name, trtype, traddr, adrfam=None, trsvc
     if ddgst:
         params['ddgst'] = ddgst
 
-    if fabrics_timeout:
-        params['fabrics_connect_timeout_us'] = fabrics_timeout
+    if fabrics_connect_timeout_us:
+        params['fabrics_connect_timeout_us'] = fabrics_connect_timeout_us
 
     if multipath:
         params['multipath'] = multipath
@@ -950,7 +941,7 @@ def bdev_nvme_detach_controller(client, name, trtype=None, traddr=None,
     return client.call('bdev_nvme_detach_controller', params)
 
 
-def bdev_nvme_reset_controller(client, name, cntlid):
+def bdev_nvme_reset_controller(client, name, cntlid=None):
     """Reset an NVMe controller or all NVMe controllers in an NVMe bdev controller.
 
     Args:
@@ -966,7 +957,7 @@ def bdev_nvme_reset_controller(client, name, cntlid):
     return client.call('bdev_nvme_reset_controller', params)
 
 
-def bdev_nvme_enable_controller(client, name, cntlid):
+def bdev_nvme_enable_controller(client, name, cntlid=None):
     """Enable an NVMe controller or all NVMe controllers in an NVMe bdev controller.
 
     Args:
@@ -982,7 +973,7 @@ def bdev_nvme_enable_controller(client, name, cntlid):
     return client.call('bdev_nvme_enable_controller', params)
 
 
-def bdev_nvme_disable_controller(client, name, cntlid):
+def bdev_nvme_disable_controller(client, name, cntlid=None):
     """Disable an NVMe controller or all NVMe controllers in an NVMe bdev controller.
 
     Args:
@@ -1076,7 +1067,7 @@ def bdev_nvme_get_discovery_info(client):
     return client.call('bdev_nvme_get_discovery_info')
 
 
-def bdev_nvme_get_io_paths(client, name):
+def bdev_nvme_get_io_paths(client, name=None):
     """Display all or the specified NVMe bdev's active I/O paths
 
     Args:
@@ -1105,7 +1096,7 @@ def bdev_nvme_set_preferred_path(client, name, cntlid):
     return client.call('bdev_nvme_set_preferred_path', params)
 
 
-def bdev_nvme_set_multipath_policy(client, name, policy, selector, rr_min_io):
+def bdev_nvme_set_multipath_policy(client, name, policy, selector=None, rr_min_io=None):
     """Set multipath policy of the NVMe bdev
 
     Args:
@@ -1191,7 +1182,7 @@ def bdev_zone_block_delete(client, name):
     return client.call('bdev_zone_block_delete', params)
 
 
-def bdev_rbd_register_cluster(client, name, user_id=None, config_param=None, config_file=None, key_file=None, core_mask=None):
+def bdev_rbd_register_cluster(client, name=None, user_id=None, config_param=None, config_file=None, key_file=None, core_mask=None):
     """Create a Rados Cluster object of the Ceph RBD backend.
 
     Args:
@@ -1205,8 +1196,9 @@ def bdev_rbd_register_cluster(client, name, user_id=None, config_param=None, con
     Returns:
         Name of registered Rados Cluster object.
     """
-    params = {'name': name}
-
+    params = {}
+    if name is not None:
+        params['name'] = name
     if user_id is not None:
         params['user_id'] = user_id
     if config_param is not None:
@@ -1231,7 +1223,7 @@ def bdev_rbd_unregister_cluster(client, name):
     return client.call('bdev_rbd_unregister_cluster', params)
 
 
-def bdev_rbd_get_clusters_info(client, name):
+def bdev_rbd_get_clusters_info(client, name=None):
     """Get the cluster(s) info
 
     Args:
@@ -1388,7 +1380,7 @@ def bdev_error_delete(client, name):
     return client.call('bdev_error_delete', params)
 
 
-def bdev_iscsi_set_options(client, timeout_sec):
+def bdev_iscsi_set_options(client, timeout_sec=None):
     """Set options for the bdev iscsi.
 
     Args:
@@ -1592,16 +1584,18 @@ def bdev_split_delete(client, base_bdev):
     return client.call('bdev_split_delete', params)
 
 
-def bdev_ftl_create(client, name, base_bdev, **kwargs):
+def bdev_ftl_create(client, name, base_bdev, cache, **kwargs):
     """Construct FTL bdev
 
     Args:
         name: name of the bdev
         base_bdev: name of the base bdev
+        cache: name of the cache device
         kwargs: optional parameters
     """
     params = {'name': name,
-              'base_bdev': base_bdev}
+              'base_bdev': base_bdev,
+              'cache': cache}
     for key, value in kwargs.items():
         if value is not None:
             params[key] = value
@@ -1609,16 +1603,18 @@ def bdev_ftl_create(client, name, base_bdev, **kwargs):
     return client.call('bdev_ftl_create', params)
 
 
-def bdev_ftl_load(client, name, base_bdev, **kwargs):
+def bdev_ftl_load(client, name, base_bdev, cache, **kwargs):
     """Load FTL bdev
 
     Args:
         name: name of the bdev
         base_bdev: name of the base bdev
+        cache: Name of the cache device
         kwargs: optional parameters
     """
     params = {'name': name,
-              'base_bdev': base_bdev}
+              'base_bdev': base_bdev,
+              'cache': cache}
     for key, value in kwargs.items():
         if value is not None:
             params[key] = value
@@ -1626,26 +1622,32 @@ def bdev_ftl_load(client, name, base_bdev, **kwargs):
     return client.call('bdev_ftl_load', params)
 
 
-def bdev_ftl_unload(client, name, fast_shutdown):
+def bdev_ftl_unload(client, name, fast_shutdown=None):
     """Unload FTL bdev
 
     Args:
         name: name of the bdev
+        fast_shutdown: When set FTL will minimize persisted data during deletion and rely on shared memory during next load
     """
-    params = {'name': name,
-              'fast_shutdown': fast_shutdown}
+    params = {'name': name}
+
+    if fast_shutdown is not None:
+        params['fast_shutdown'] = fast_shutdown
 
     return client.call('bdev_ftl_unload', params)
 
 
-def bdev_ftl_delete(client, name, fast_shutdown):
+def bdev_ftl_delete(client, name, fast_shutdown=None):
     """Delete FTL bdev
 
     Args:
         name: name of the bdev
+        fast_shutdown: When set FTL will minimize persisted data during deletion and rely on shared memory during next load
     """
-    params = {'name': name,
-              'fast_shutdown': fast_shutdown}
+    params = {'name': name}
+
+    if fast_shutdown is not None:
+        params['fast_shutdown'] = fast_shutdown
 
     return client.call('bdev_ftl_delete', params)
 
@@ -1757,6 +1759,7 @@ def bdev_enable_histogram(client, name, enable):
 
     Args:
         bdev_name: name of bdev
+        enable: Enable or disable histogram on specified device
     """
     params = {'name': name, "enable": enable}
     return client.call('bdev_enable_histogram', params)

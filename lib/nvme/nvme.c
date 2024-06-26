@@ -706,9 +706,9 @@ nvme_ctrlr_poll_internal(struct spdk_nvme_ctrlr *ctrlr,
 		/* Controller failed to initialize. */
 		TAILQ_REMOVE(&probe_ctx->init_ctrlrs, ctrlr, tailq);
 		SPDK_ERRLOG("Failed to initialize SSD: %s\n", ctrlr->trid.traddr);
-		nvme_robust_mutex_lock(&ctrlr->ctrlr_lock);
+		nvme_ctrlr_lock(ctrlr);
 		nvme_ctrlr_fail(ctrlr, false);
-		nvme_robust_mutex_unlock(&ctrlr->ctrlr_lock);
+		nvme_ctrlr_unlock(ctrlr);
 		nvme_ctrlr_destruct(ctrlr);
 		return;
 	}
@@ -1608,6 +1608,21 @@ nvme_parse_addr(struct sockaddr_storage *sa, int family, const char *addr, const
 
 	freeaddrinfo(res);
 	return ret;
+}
+
+int
+nvme_get_default_hostnqn(char *buf, int len)
+{
+	char uuid[SPDK_UUID_STRING_LEN];
+	int rc;
+
+	spdk_uuid_fmt_lower(uuid, sizeof(uuid), &g_spdk_nvme_driver->default_extended_host_id);
+	rc = snprintf(buf, len, "nqn.2014-08.org.nvmexpress:uuid:%s", uuid);
+	if (rc < 0 || rc >= len) {
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 SPDK_LOG_REGISTER_COMPONENT(nvme)

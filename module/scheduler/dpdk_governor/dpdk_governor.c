@@ -14,21 +14,35 @@
 #include <rte_power.h>
 
 static uint32_t
+_get_core_avail_freqs(uint32_t lcore_id, uint32_t *freqs, uint32_t num)
+{
+	uint32_t rc;
+
+	rc = rte_power_freqs(lcore_id, freqs, num);
+	if (!rc) {
+		SPDK_ERRLOG("Unable to get current core frequency array for core %d\n.", lcore_id);
+
+		return 0;
+	}
+
+	return rc;
+}
+
+static uint32_t
 _get_core_curr_freq(uint32_t lcore_id)
 {
-	const uint32_t MAX_CORE_FREQ_NUM = 64;
-	uint32_t freqs[MAX_CORE_FREQ_NUM];
+	uint32_t freqs[SPDK_MAX_LCORE_FREQS];
 	uint32_t freq_index;
 	int rc;
 
-	rc = rte_power_freqs(lcore_id, freqs, MAX_CORE_FREQ_NUM);
+	rc = rte_power_freqs(lcore_id, freqs, SPDK_MAX_LCORE_FREQS);
 	if (!rc) {
 		SPDK_ERRLOG("Unable to get current core frequency array for core %d\n.", lcore_id);
 
 		return 0;
 	}
 	freq_index = rte_power_get_freq(lcore_id);
-	if (freq_index >= MAX_CORE_FREQ_NUM) {
+	if (freq_index >= SPDK_MAX_LCORE_FREQS) {
 		SPDK_ERRLOG("Unable to get current core frequency for core %d\n.", lcore_id);
 
 		return 0;
@@ -73,6 +87,31 @@ _get_core_capabilities(uint32_t lcore_id, struct spdk_governor_capabilities *cap
 	}
 
 	capabilities->priority = caps.priority == 0 ? false : true;
+
+	return 0;
+}
+
+static int
+_dump_info_json(struct spdk_json_write_ctx *w)
+{
+	enum power_management_env env;
+
+	env = rte_power_get_env();
+
+	if (env == PM_ENV_ACPI_CPUFREQ) {
+		spdk_json_write_named_string(w, "env", "acpi-cpufreq");
+	} else if (env == PM_ENV_KVM_VM) {
+		spdk_json_write_named_string(w, "env", "kvm");
+	} else if (env == PM_ENV_PSTATE_CPUFREQ) {
+		spdk_json_write_named_string(w, "env", "intel-pstate");
+	} else if (env == PM_ENV_CPPC_CPUFREQ) {
+		spdk_json_write_named_string(w, "env", "cppc-cpufreq");
+	} else if (env == PM_ENV_AMD_PSTATE_CPUFREQ) {
+		spdk_json_write_named_string(w, "env", "amd-pstate");
+	} else {
+		spdk_json_write_named_string(w, "env", "unknown");
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -150,12 +189,14 @@ _deinit(void)
 
 static struct spdk_governor dpdk_governor = {
 	.name = "dpdk_governor",
+	.get_core_avail_freqs = _get_core_avail_freqs,
 	.get_core_curr_freq = _get_core_curr_freq,
 	.core_freq_up = _core_freq_up,
 	.core_freq_down = _core_freq_down,
 	.set_core_freq_max = _set_core_freq_max,
 	.set_core_freq_min = _set_core_freq_min,
 	.get_core_capabilities = _get_core_capabilities,
+	.dump_info_json = _dump_info_json,
 	.init = _init,
 	.deinit = _deinit,
 };

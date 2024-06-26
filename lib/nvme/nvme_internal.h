@@ -564,6 +564,7 @@ struct spdk_nvme_ns {
 
 	uint32_t			md_size;
 	uint32_t			pi_type;
+	uint32_t			pi_format;
 	uint32_t			sectors_per_max_io;
 	uint32_t			sectors_per_max_io_no_md;
 	uint32_t			sectors_per_stripe;
@@ -585,6 +586,8 @@ struct spdk_nvme_ns {
 
 	/* Zoned Namespace Command Set Specific Identify Namespace data. */
 	struct spdk_nvme_zns_ns_data	*nsdata_zns;
+
+	struct spdk_nvme_nvm_ns_data	*nsdata_nvm;
 
 	RB_ENTRY(spdk_nvme_ns)		node;
 };
@@ -825,6 +828,16 @@ enum nvme_ctrlr_state {
 	NVME_CTRLR_STATE_SET_SUPPORTED_FEATURES,
 
 	/**
+	 * Set the Host Behavior Support feature of the controller.
+	 */
+	NVME_CTRLR_STATE_SET_HOST_FEATURE,
+
+	/**
+	 * Waiting for the Host Behavior Support feature of the controller.
+	 */
+	NVME_CTRLR_STATE_WAIT_FOR_SET_HOST_FEATURE,
+
+	/**
 	 * Set Doorbell Buffer Config of the controller.
 	 */
 	NVME_CTRLR_STATE_SET_DB_BUF_CFG,
@@ -1034,6 +1047,8 @@ struct spdk_nvme_ctrlr {
 	STAILQ_HEAD(, nvme_request)	queued_aborts;
 	uint32_t			outstanding_aborts;
 
+	uint32_t			lock_depth;
+
 	/* CB to notify the user when the ctrlr is removed/failed. */
 	spdk_nvme_remove_cb			remove_cb;
 	void					*cb_ctx;
@@ -1163,9 +1178,26 @@ nvme_robust_mutex_lock(pthread_mutex_t *mtx)
 }
 
 static inline int
+nvme_ctrlr_lock(struct spdk_nvme_ctrlr *ctrlr)
+{
+	int rc;
+
+	rc = nvme_robust_mutex_lock(&ctrlr->ctrlr_lock);
+	ctrlr->lock_depth++;
+	return rc;
+}
+
+static inline int
 nvme_robust_mutex_unlock(pthread_mutex_t *mtx)
 {
 	return pthread_mutex_unlock(mtx);
+}
+
+static inline int
+nvme_ctrlr_unlock(struct spdk_nvme_ctrlr *ctrlr)
+{
+	ctrlr->lock_depth--;
+	return nvme_robust_mutex_unlock(&ctrlr->ctrlr_lock);
 }
 
 /* Poll group management functions. */
@@ -1278,6 +1310,7 @@ int	nvme_ctrlr_identify_active_ns(struct spdk_nvme_ctrlr *ctrlr);
 void	nvme_ns_set_identify_data(struct spdk_nvme_ns *ns);
 void	nvme_ns_set_id_desc_list_data(struct spdk_nvme_ns *ns);
 void	nvme_ns_free_zns_specific_data(struct spdk_nvme_ns *ns);
+void	nvme_ns_free_nvm_specific_data(struct spdk_nvme_ns *ns);
 void	nvme_ns_free_iocs_specific_data(struct spdk_nvme_ns *ns);
 bool	nvme_ns_has_supported_iocs_specific_data(struct spdk_nvme_ns *ns);
 int	nvme_ns_construct(struct spdk_nvme_ns *ns, uint32_t id,
@@ -1668,6 +1701,7 @@ int	nvme_ctrlr_get_ref_count(struct spdk_nvme_ctrlr *ctrlr);
 int	nvme_ctrlr_reinitialize_io_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpair *qpair);
 int	nvme_parse_addr(struct sockaddr_storage *sa, int family,
 			const char *addr, const char *service, long int *port);
+int	nvme_get_default_hostnqn(char *buf, int len);
 
 static inline bool
 _is_page_aligned(uint64_t address, uint64_t page_size)
