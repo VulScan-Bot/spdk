@@ -2,6 +2,14 @@
 
 ## v24.09: (Upcoming Release)
 
+### sock
+
+New functions that allows to register interrupt for given socket group:
+`spdk_sock_group_register_interrupt()`
+`spdk_sock_group_unregister_interrupt()`
+Both uses API exposed by the thread.h, see below for details.
+Support implemented only for the POSIX and SSL sockets.
+
 ### thread
 
 New function `spdk_interrupt_register_for_events()` build on top of `spdk_fd_group_add_for_events()`.
@@ -25,6 +33,11 @@ The `framework_get_reactors` RPC method supports getting pid and tid.
 ### env_dpdk
 
 `spdk_get_tid` is added to get the tid of the current thread.
+
+### scheduler
+
+Added `framework_get_governor` RPC to retrieve the power governor name,
+power env and the frequencies available, frequency set to the cpu cores.
 
 ## v24.05
 

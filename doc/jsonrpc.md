@@ -817,6 +817,57 @@ Example response:
 }
 ~~~
 
+### framework_get_governor {#rpc_framework_get_governor}
+
+Retrieve current governor name, power env, frequencies available and frequency set to the cpu cores.
+
+#### Parameters
+
+This method has no parameters.
+
+#### Response
+
+Displays the current governor name, power env, frequencies available and frequency set to the cpu cores.
+
+#### Example
+
+Example request:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "method": "framework_get_governor",
+  "id": 1,
+}
+~~~
+
+Example response:
+
+~~~json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "governor_name": "dpdk_governor"
+    "module_specific": {
+      "env": "amd-pstate"
+    }
+    "cores": [
+      {
+        "lcore_id": 0,
+        "available_frequencies": [
+          4951000,
+          4948000,
+          4748000,
+          4744000
+        ],
+        "current_frequency": 4744000
+      }
+    ]
+  }
+}
+~~~
+
 ### framework_enable_cpumask_locks
 
 Enable CPU core lock files to block multiple SPDK applications from running on the same cpumask.
@@ -8112,6 +8163,7 @@ disable_shadow_doorbells    | Optional | boolean | disable shadow doorbell suppo
 zcopy                       | Optional | boolean | Use zero-copy operations if the underlying bdev supports them
 ack_timeout                 | Optional | number  | ACK timeout in milliseconds
 data_wr_pool_size           | Optional | number  | RDMA data WR pool size (RDMA only)
+disable_command_passthru    | Optional | boolean | Disallow command passthru.
 
 #### Example
 

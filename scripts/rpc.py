@@ -187,6 +187,13 @@ if __name__ == "__main__":
         'framework_get_scheduler', help='Display currently set scheduler and its properties.')
     p.set_defaults(func=framework_get_scheduler)
 
+    def framework_get_governor(args):
+        print_dict(rpc.app.framework_get_governor(args.client))
+
+    p = subparsers.add_parser(
+        'framework_get_governor', help='Display currently set governor and the available, set CPU frequencies.')
+    p.set_defaults(func=framework_get_governor)
+
     def framework_disable_cpumask_locks(args):
         rpc.framework_disable_cpumask_locks(args.client)
 
@@ -2581,6 +2588,7 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('--acceptor-poll-rate', help='Polling interval of the acceptor for incoming connections (usec)', type=int)
     p.add_argument('--ack-timeout', help='ACK timeout in milliseconds', type=int)
     p.add_argument('--data-wr-pool-size', help='RDMA data WR pool size. Relevant only for RDMA transport', type=int)
+    p.add_argument('--disable-command-passthru', help='Disallow command passthru', action='store_true')
     p.set_defaults(func=nvmf_create_transport)
 
     def nvmf_get_transports(args):

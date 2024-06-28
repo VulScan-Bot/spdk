@@ -379,9 +379,11 @@ nvmf_ctrlr_cdata_init(struct spdk_nvmf_transport *transport, struct spdk_nvmf_su
 	cdata->ieee[1] = 0xd2;
 	cdata->ieee[2] = 0x5c;
 	cdata->oncs.compare = 1;
+	cdata->oncs.dsm = 1;
+	cdata->oncs.write_zeroes = 1;
 	cdata->oncs.reservations = 1;
-	cdata->fuses.compare_and_write = 1;
 	cdata->oncs.copy = 1;
+	cdata->fuses.compare_and_write = 1;
 	cdata->sgls.supported = 1;
 	cdata->sgls.keyed_sgl = 1;
 	cdata->sgls.sgl_offset = 1;
@@ -398,7 +400,7 @@ nvmf_ctrlr_cdata_init(struct spdk_nvmf_transport *transport, struct spdk_nvmf_su
 }
 
 static bool
-nvmf_subsys_has_multi_iocs(struct spdk_nvmf_subsystem *subsystem)
+nvmf_subsystem_has_zns_iocs(struct spdk_nvmf_subsystem *subsystem)
 {
 	struct spdk_nvmf_ns *ns;
 	uint32_t i;
@@ -540,7 +542,7 @@ nvmf_ctrlr_create(struct spdk_nvmf_subsystem *subsystem,
 	/* ready timeout - 500 msec units */
 	ctrlr->vcprop.cap.bits.to = NVMF_CTRLR_RESET_SHN_TIMEOUT_IN_MS / 500;
 	ctrlr->vcprop.cap.bits.dstrd = 0; /* fixed to 0 for NVMe-oF */
-	subsys_has_multi_iocs = nvmf_subsys_has_multi_iocs(subsystem);
+	subsys_has_multi_iocs = nvmf_subsystem_has_zns_iocs(subsystem);
 	if (subsys_has_multi_iocs) {
 		ctrlr->vcprop.cap.bits.css =
 			SPDK_NVME_CAP_CSS_IOCS; /* One or more I/O command sets supported */
@@ -2519,6 +2521,8 @@ static const struct spdk_nvme_cmds_and_effect_log_page g_cmds_and_effect_log_pag
 		[SPDK_NVME_OPC_ZONE_MGMT_SEND]		= {1, 1, 0, 0, 0, 0, 0, 0},
 		/* ZONE MANAGEMENT RECEIVE */
 		[SPDK_NVME_OPC_ZONE_MGMT_RECV]		= {1, 0, 0, 0, 0, 0, 0, 0},
+		/* ZONE APPEND */
+		[SPDK_NVME_OPC_ZONE_APPEND]		= {1, 1, 0, 0, 0, 0, 0, 0},
 		/* COPY */
 		[SPDK_NVME_OPC_COPY]			= {1, 1, 0, 0, 0, 0, 0, 0},
 	},
@@ -2531,16 +2535,31 @@ nvmf_get_cmds_and_effects_log_page(struct spdk_nvmf_ctrlr *ctrlr, struct iovec *
 	uint32_t page_size = sizeof(struct spdk_nvme_cmds_and_effect_log_page);
 	size_t copy_len = 0;
 	struct spdk_nvme_cmds_and_effect_log_page cmds_and_effect_log_page = g_cmds_and_effect_log_page;
-	struct spdk_nvme_cmds_and_effect_entry csupp_and_lbcc_effect_entry = {1, 1, 0, 0, 0, 0, 0, 0};
+	struct spdk_nvme_cmds_and_effect_entry zero = {};
 	struct spdk_iov_xfer ix;
 
-	spdk_iov_xfer_init(&ix, iovs, iovcnt);
+	if (!ctrlr->cdata.oncs.write_zeroes || !nvmf_ctrlr_write_zeroes_supported(ctrlr)) {
+		cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_WRITE_ZEROES] = zero;
+	}
+	if (!ctrlr->cdata.oncs.dsm || !nvmf_ctrlr_dsm_supported(ctrlr)) {
+		cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_DATASET_MANAGEMENT] = zero;
+	}
+	if (!ctrlr->cdata.oncs.compare) {
+		cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_COMPARE] = zero;
+	}
+	if (!nvmf_subsystem_has_zns_iocs(ctrlr->subsys)) {
+		cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_ZONE_MGMT_SEND] = zero;
+		cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_ZONE_MGMT_RECV] = zero;
+	}
+	if (!nvmf_subsystem_zone_append_supported(ctrlr->subsys)) {
+		cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_ZONE_APPEND] = zero;
+	}
+	if (!ctrlr->cdata.oncs.copy) {
+		cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_COPY] = zero;
+	}
 
+	spdk_iov_xfer_init(&ix, iovs, iovcnt);
 	if (offset < page_size) {
-		if (ctrlr->subsys->zone_append_supported) {
-			cmds_and_effect_log_page.io_cmds_supported[SPDK_NVME_OPC_ZONE_APPEND] =
-				csupp_and_lbcc_effect_entry;
-		}
 		copy_len = spdk_min(page_size - offset, length);
 		spdk_iov_xfer_from_buf(&ix, (char *)(&cmds_and_effect_log_page) + offset, copy_len);
 	}
@@ -2882,8 +2901,9 @@ spdk_nvmf_ctrlr_identify_ctrlr(struct spdk_nvmf_ctrlr *ctrlr, struct spdk_nvme_c
 		cdata->nvmf_specific = ctrlr->cdata.nvmf_specific;
 
 		cdata->oncs.compare = ctrlr->cdata.oncs.compare;
-		cdata->oncs.dsm = nvmf_ctrlr_dsm_supported(ctrlr);
-		cdata->oncs.write_zeroes = nvmf_ctrlr_write_zeroes_supported(ctrlr);
+		cdata->oncs.dsm = ctrlr->cdata.oncs.dsm && nvmf_ctrlr_dsm_supported(ctrlr);
+		cdata->oncs.write_zeroes = ctrlr->cdata.oncs.write_zeroes &&
+					   nvmf_ctrlr_write_zeroes_supported(ctrlr);
 		cdata->oncs.reservations = ctrlr->cdata.oncs.reservations;
 		cdata->oncs.copy = ctrlr->cdata.oncs.copy;
 		cdata->ocfs.copy_format0 = cdata->oncs.copy;
@@ -4412,26 +4432,50 @@ nvmf_ctrlr_process_io_cmd(struct spdk_nvmf_request *req)
 			return nvmf_bdev_ctrlr_read_cmd(bdev, desc, ch, req);
 		case SPDK_NVME_OPC_WRITE:
 			return nvmf_bdev_ctrlr_write_cmd(bdev, desc, ch, req);
-		case SPDK_NVME_OPC_COMPARE:
-			return nvmf_bdev_ctrlr_compare_cmd(bdev, desc, ch, req);
-		case SPDK_NVME_OPC_WRITE_ZEROES:
-			return nvmf_bdev_ctrlr_write_zeroes_cmd(bdev, desc, ch, req);
 		case SPDK_NVME_OPC_FLUSH:
 			return nvmf_bdev_ctrlr_flush_cmd(bdev, desc, ch, req);
+		case SPDK_NVME_OPC_COMPARE:
+			if (spdk_unlikely(!ctrlr->cdata.oncs.compare)) {
+				goto invalid_opcode;
+			}
+			return nvmf_bdev_ctrlr_compare_cmd(bdev, desc, ch, req);
+		case SPDK_NVME_OPC_WRITE_ZEROES:
+			if (spdk_unlikely(!ctrlr->cdata.oncs.write_zeroes)) {
+				goto invalid_opcode;
+			}
+			return nvmf_bdev_ctrlr_write_zeroes_cmd(bdev, desc, ch, req);
 		case SPDK_NVME_OPC_DATASET_MANAGEMENT:
+			if (spdk_unlikely(!ctrlr->cdata.oncs.dsm)) {
+				goto invalid_opcode;
+			}
 			return nvmf_bdev_ctrlr_dsm_cmd(bdev, desc, ch, req);
 		case SPDK_NVME_OPC_RESERVATION_REGISTER:
 		case SPDK_NVME_OPC_RESERVATION_ACQUIRE:
 		case SPDK_NVME_OPC_RESERVATION_RELEASE:
 		case SPDK_NVME_OPC_RESERVATION_REPORT:
+			if (spdk_unlikely(!ctrlr->cdata.oncs.reservations)) {
+				goto invalid_opcode;
+			}
 			spdk_thread_send_msg(ctrlr->subsys->thread, nvmf_ns_reservation_request, req);
 			return SPDK_NVMF_REQUEST_EXEC_STATUS_ASYNCHRONOUS;
 		case SPDK_NVME_OPC_COPY:
+			if (spdk_unlikely(!ctrlr->cdata.oncs.copy)) {
+				goto invalid_opcode;
+			}
 			return nvmf_bdev_ctrlr_copy_cmd(bdev, desc, ch, req);
 		default:
+			if (spdk_unlikely(qpair->transport->opts.disable_command_passthru)) {
+				goto invalid_opcode;
+			}
 			return nvmf_bdev_ctrlr_nvme_passthru_io(bdev, desc, ch, req);
 		}
 	}
+invalid_opcode:
+	SPDK_INFOLOG(nvmf, "Unsupported IO opcode 0x%x\n", cmd->opc);
+	response->status.sct = SPDK_NVME_SCT_GENERIC;
+	response->status.sc = SPDK_NVME_SC_INVALID_OPCODE;
+	response->status.dnr = 1;
+	return SPDK_NVMF_REQUEST_EXEC_STATUS_COMPLETE;
 }
 
 static void

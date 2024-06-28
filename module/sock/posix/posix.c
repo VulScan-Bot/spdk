@@ -63,6 +63,7 @@ TAILQ_HEAD(spdk_has_data_list, spdk_posix_sock);
 struct spdk_posix_sock_group_impl {
 	struct spdk_sock_group_impl	base;
 	int				fd;
+	struct spdk_interrupt		*intr;
 	struct spdk_has_data_list	socks_with_data;
 	int				placement_id;
 	struct spdk_pipe_group		*pipe_group;
@@ -1117,6 +1118,7 @@ static struct spdk_sock *
 _posix_sock_accept(struct spdk_sock *_sock, bool enable_ssl)
 {
 	struct spdk_posix_sock		*sock = __posix_sock(_sock);
+	struct spdk_posix_sock_group_impl *group = __posix_group_impl(sock->base.group_impl);
 	struct sockaddr_storage		sa;
 	socklen_t			salen;
 	int				rc, fd;
@@ -1129,6 +1131,12 @@ _posix_sock_accept(struct spdk_sock *_sock, bool enable_ssl)
 	salen = sizeof(sa);
 
 	assert(sock != NULL);
+
+	/* epoll_wait will trigger again if there is more than one request */
+	if (group && sock->socket_has_data) {
+		sock->socket_has_data = false;
+		TAILQ_REMOVE(&group->socks_with_data, sock, link);
+	}
 
 	rc = accept(sock->fd, (struct sockaddr *)&sa, &salen);
 
@@ -1896,6 +1904,10 @@ posix_sock_group_impl_add_sock(struct spdk_sock_group_impl *_group, struct spdk_
 	memset(&event, 0, sizeof(event));
 	/* EPOLLERR is always on even if we don't set it, but be explicit for clarity */
 	event.events = EPOLLIN | EPOLLERR;
+	if (spdk_interrupt_mode_is_enabled()) {
+		event.events |= EPOLLOUT;
+	}
+
 	event.data.ptr = sock;
 
 	rc = epoll_ctl(group->fd, EPOLL_CTL_ADD, sock->fd, &event);
@@ -2163,6 +2175,25 @@ posix_sock_group_impl_poll(struct spdk_sock_group_impl *_group, int max_events,
 }
 
 static int
+posix_sock_group_impl_register_interrupt(struct spdk_sock_group_impl *_group, uint32_t events,
+		spdk_interrupt_fn fn, void *arg, const char *name)
+{
+	struct spdk_posix_sock_group_impl *group = __posix_group_impl(_group);
+
+	group->intr = spdk_interrupt_register_for_events(group->fd, events, fn, arg, name);
+
+	return group->intr ? 0 : -1;
+}
+
+static void
+posix_sock_group_impl_unregister_interrupt(struct spdk_sock_group_impl *_group)
+{
+	struct spdk_posix_sock_group_impl *group = __posix_group_impl(_group);
+
+	spdk_interrupt_unregister(&group->intr);
+}
+
+static int
 _sock_group_impl_close(struct spdk_sock_group_impl *_group, uint32_t enable_placement_id)
 {
 	struct spdk_posix_sock_group_impl *group = __posix_group_impl(_group);
@@ -2214,6 +2245,8 @@ static struct spdk_net_impl g_posix_net_impl = {
 	.group_impl_add_sock	= posix_sock_group_impl_add_sock,
 	.group_impl_remove_sock = posix_sock_group_impl_remove_sock,
 	.group_impl_poll	= posix_sock_group_impl_poll,
+	.group_impl_register_interrupt     = posix_sock_group_impl_register_interrupt,
+	.group_impl_unregister_interrupt  = posix_sock_group_impl_unregister_interrupt,
 	.group_impl_close	= posix_sock_group_impl_close,
 	.get_opts	= posix_sock_impl_get_opts,
 	.set_opts	= posix_sock_impl_set_opts,
@@ -2263,6 +2296,8 @@ static struct spdk_net_impl g_ssl_net_impl = {
 	.group_impl_add_sock	= posix_sock_group_impl_add_sock,
 	.group_impl_remove_sock = posix_sock_group_impl_remove_sock,
 	.group_impl_poll	= posix_sock_group_impl_poll,
+	.group_impl_register_interrupt    = posix_sock_group_impl_register_interrupt,
+	.group_impl_unregister_interrupt  = posix_sock_group_impl_unregister_interrupt,
 	.group_impl_close	= ssl_sock_group_impl_close,
 	.get_opts	= ssl_sock_impl_get_opts,
 	.set_opts	= ssl_sock_impl_set_opts,
